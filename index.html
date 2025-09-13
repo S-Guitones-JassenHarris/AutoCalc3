@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Batch Cost Calculator (MVP)</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="wrap">
+    <h1>
+      Batch Cost Calculator — MVP (placeholders:
+      <span class="chip">Machine A</span>, <span class="chip">Job A</span>, <span class="chip">Cost A</span>)
+    </h1>
+
+    <!-- ===== TOP HALF: quotation bars ===== -->
+    <div class="bars" id="bars"></div>
+
+    <!-- ===== BOTTOM HALF: active quotation editor ===== -->
+    <div class="editor" id="editor"></div>
+
+    <div class="help">
+      <p><strong>Info:</strong> Demo data auto-loads from
+        <code>data/machines_demo.csv</code> and <code>data/job_fields_demo.csv</code>
+        if present. Otherwise it falls back to placeholders.
+      </p>
+    </div>
+  </div>
+
+  <script defer src="app.js"></script>
+</body>
+</html>

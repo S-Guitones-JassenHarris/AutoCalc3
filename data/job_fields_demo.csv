@@ -1,0 +1,8 @@
+job_type_id,job_type_name,key,label,type,min,step,default
+jobA,Job A,units,Units,number,0,1,1
+jobA,Job A,costA,Cost A (per unit),number,0,0.01,0
+jobB,Job B,units,Units,number,0,1,1
+jobB,Job B,rate,Hourly Rate,number,0,1,0
+jobC,Job C,qty,Quantity,number,0,1,1
+jobC,Job C,material_cost,Material Cost,number,0,0.01,0
+jobC,Job C,setup_fee,Setup Fee,number,0,0.01,0

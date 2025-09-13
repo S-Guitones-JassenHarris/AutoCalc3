@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Batch Cost Calculator (MVP)</title>
+  <style>
+    :root{
+      --bg:#0f172a; --panel:#0b1220; --ink:#e2e8f0; --muted:#94a3b8; --line:#1f2937; --accent:#2563eb; --chip:#1f2937; --ok:#16a34a; --warn:#f59e0b;
+    }
+    *{box-sizing:border-box}
+    body{margin:0;font-family:system-ui,Segoe UI,Roboto,Arial,sans-serif;background:var(--bg);color:var(--ink)}
+    .wrap{max-width:1200px;margin:0 auto;padding:20px}
+    h1{margin:4px 0 16px;font-weight:700;font-size:1.3rem;color:var(--ink)}
+
+    /* Top half: quotation bars */
+    .bars{display:flex;gap:10px;overflow:auto;padding-bottom:8px}
+    .bar{min-width:220px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px;cursor:pointer;transition:transform .05s ease,filter .2s ease}
+    .bar:active{transform:translateY(1px)}
+    .bar.active{outline:2px solid var(--accent)}
+    .bar .name{font-weight:600}
+    .bar .tot{margin-top:6px;font-size:.95rem}
+    .bar .status{margin-top:6px;font-size:.8rem;color:var(--muted)}
+    .summary{background:#13213f}
+    .newBtn{display:flex;align-items:center;justify-content:center;min-width:160px;border:1px dashed var(--line);background:transparent;color:var(--muted)}
+
+    /* Bottom half: editor */
+    .editor{margin-top:14px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px}
+    .controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:12px}
+    .controls .spacer{flex:1}
+    select,input,button{background:#111827;color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:8px 10px}
+    button.primary{background:var(--accent);border-color:transparent}
+    button.ghost{background:transparent}
+
+    .chip{display:inline-block;background:var(--chip);border:1px solid var(--line);padding:2px 8px;border-radius:999px;font-size:.8rem}
+    .muted{color:var(--muted)}
+
+    .pairBox{border:1px solid var(--line);border-radius:10px;padding:8px;margin:10px 0;background:#0f1628}
+    .pairHead{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px}
+    .pairHead .right{margin-left:auto;display:flex;gap:6px}
+
+    .fieldGrid{display:grid;grid-template-columns:repeat(auto-fit, minmax(180px, 1fr));gap:10px;margin:8px 0}
+    .fieldCard{border:1px solid var(--line);border-radius:10px;padding:8px;background:#0f1628}
+
+    .totals{display:flex;gap:10px;justify-content:flex-end;margin-top:12px}
+    .totals .card{background:#111827;border:1px solid var(--line);border-radius:10px;padding:10px 12px;min-width:160px}
+    .totals .big{font-size:1.2rem;font-weight:700}
+
+    .help{margin-top:12px;color:var(--muted);font-size:.9rem}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Batch Cost Calculator — MVP (placeholders: <span class="chip">Machine A</span>, <span class="chip">Job A</span>, <span class="chip">Cost A</span>)</h1>
+
+    <!-- ===== TOP HALF: quotation bars ===== -->
+    <div class="bars" id="bars"></div>
+
+    <!-- ===== BOTTOM HALF: active quotation editor ===== -->
+    <div class="editor" id="editor"></div>
+
+    <div class="help">
+      <p><strong>Update:</strong> Each <em>Quotation bar</em> is locked to one <em>Job Type</em>. You choose the Job Type once at the quotation header; all items in that quotation use the same fields. Inputs are shown as clean <em>field cards</em> (label on top, input below) to match your two-row concept.</p>
+    </div>
+  </div>
+
+  <script>
+  // ================================================================
+  // MVP with placeholders: Machine A / Job A / Cost A
+  // Two-pane layout
+  //  - Top: Summary + one bar per quotation
+  //  - Bottom: Active quotation editor with per-quotation Job Type and item cards
+  // Persisted in localStorage. No external libs.
+  // ================================================================
+
+  // ---- Placeholder data ----
+  const MACHINES = [ { id: 'mA', name: 'Machine A' } ];
+
+  const JOB_TYPES = [
+    {
+      id: 'jobA', name: 'Job A',
+      fields: [
+        { key: 'units', label: 'Units', type: 'number', min: 0, step: 1, default: 1 },
+        { key: 'costA', label: 'Cost A (per unit)', type: 'number', min: 0, step: 0.01, default: 0 },
+      ],
+      compute(item){
+        const units = num(item.values.units, 0);
+        const costA = num(item.values.costA, 0);
+        return round(units * costA);
+      }
+    }
+  ];
+
+  // ---- State ----
+  const state = loadState() || {
+    quotations: [ newQuotation('Quote 1') ],
+    activeId: null,
+    taxPct: 0,
+  };
+  if (!state.activeId) state.activeId = state.quotations[0].id;
+
+  // ---- Models ----
+  function newId(prefix='id'){ return prefix + '_' + Math.random().toString(36).slice(2,9); }
+  function newQuotation(name){ return { id: newId('q'), name, jobTypeId: JOB_TYPES[0].id, items: [] }; }
+  function defaultValuesFor(jobType){ const v={}; jobType.fields.forEach(f=> v[f.key] = f.default ?? ''); return v; }
+  function newItemForQuote(q){ const m = MACHINES[0]; return { id: newId('it'), machineId: m?.id || 'mA', values: defaultValuesFor(jobTypeById(q.jobTypeId)) }; }
+
+  // ---- Utils ----
+  function num(v, fallback=0){ const n = Number(v); return Number.isFinite(n) ? n : fallback; }
+  function round(n){ return Math.round(n * 100) / 100; }
+  function save(){ localStorage.setItem('batch_calc_mvp_v4', JSON.stringify(state)); }
+  function loadState(){ try{ return JSON.parse(localStorage.getItem('batch_calc_mvp_v4')); }catch{ return null; } }
+  function jobTypeById(id){ return JOB_TYPES.find(j=>j.id===id) || JOB_TYPES[0]; }
+  function machineById(id){ return MACHINES.find(m=>m.id===id) || MACHINES[0]; }
+
+  // ---- Top bars ----
+  const barsEl = document.getElementById('bars');
+  function renderBars(){
+    barsEl.innerHTML = '';
+
+    const sum = computeSummaryTotals();
+    const summary = document.createElement('div'); summary.className = 'bar summary';
+    summary.innerHTML = `
+      <div class="name">Summary (All Quotations)</div>
+      <div class="tot">Grand Total: <strong>₱ ${sum.grandTotal.toLocaleString()}</strong></div>
+      <div class="status muted">Quotes: ${state.quotations.length}</div>
+    `;
+    barsEl.appendChild(summary);
+
+    state.quotations.forEach(q => {
+      const t = computeQuotationTotals(q);
+      const jt = jobTypeById(q.jobTypeId);
+      const bar = document.createElement('div');
+      bar.className = 'bar' + (q.id===state.activeId ? ' active' : '');
+      bar.innerHTML = `
+        <div class="name">${q.name}</div>
+        <div class="status muted">Job Type: ${jt.name}</div>
+        <div class="tot">Subtotal: ₱ ${t.subtotal.toLocaleString()}</div>
+        <div class="tot">Tax: ₱ ${t.tax.toLocaleString()}</div>
+        <div class="tot"><strong>Grand: ₱ ${t.grand.toLocaleString()}</strong></div>
+        <div class="status">Items: ${q.items.length}</div>
+      `;
+      bar.addEventListener('click', ()=>{ state.activeId = q.id; save(); render(); });
+      barsEl.appendChild(bar);
+    });
+
+    const add = document.createElement('button'); add.className = 'bar newBtn'; add.textContent = '+ New quotation';
+    add.addEventListener('click', ()=>{ const q = newQuotation('Quote ' + (state.quotations.length+1)); state.quotations.push(q); state.activeId = q.id; save(); render(); });
+    barsEl.appendChild(add);
+  }
+
+  // ---- Editor ----
+  const editorEl = document.getElementById('editor');
+  function renderEditor(){
+    const q = state.quotations.find(x=>x.id===state.activeId);
+    if (!q){ editorEl.innerHTML = '<em>No active quotation.</em>'; return; }
+    const qTotals = computeQuotationTotals(q);
+    const jt = jobTypeById(q.jobTypeId);
+
+    const header = document.createElement('div'); header.className = 'controls';
+
+    const nameInp = document.createElement('input'); nameInp.value=q.name; nameInp.placeholder='Quotation name';
+    nameInp.addEventListener('input', ()=>{ q.name = nameInp.value || 'Untitled'; save(); renderBars(); });
+
+    const jobSel = document.createElement('select');
+    JOB_TYPES.forEach(j => { const o=document.createElement('option'); o.value=j.id; o.textContent=j.name; jobSel.appendChild(o); });
+    jobSel.value = q.jobTypeId;
+    jobSel.addEventListener('change', ()=>{
+      if (!confirm('Change job type for this quotation? All item fields will reset.')) { jobSel.value = q.jobTypeId; return; }
+      q.jobTypeId = jobSel.value; const def = defaultValuesFor(jobTypeById(q.jobTypeId));
+      q.items.forEach(it => it.values = { ...def }); save(); render();
+    });
+
+    const taxInp = document.createElement('input'); taxInp.type='number'; taxInp.step='0.1'; taxInp.min='0'; taxInp.value = state.taxPct; taxInp.title='Tax % (global)';
+    taxInp.addEventListener('input', ()=>{ state.taxPct = num(taxInp.value,0); save(); render(); });
+
+    const delBtn = document.createElement('button'); delBtn.className='ghost'; delBtn.textContent='Delete quotation';
+    delBtn.addEventListener('click', ()=>{ if(!confirm('Delete this quotation?')) return; const idx=state.quotations.findIndex(x=>x.id===q.id); if(idx>=0) state.quotations.splice(idx,1); if(!state.quotations.length) state.quotations.push(newQuotation('Quote 1')); state.activeId = state.quotations[0].id; save(); render(); });
+
+    const addItemBtn = document.createElement('button'); addItemBtn.className='primary'; addItemBtn.textContent='+ Add Item';
+    addItemBtn.addEventListener('click', ()=>{ q.items.push(newItemForQuote(q)); save(); render(); });
+
+    header.append(
+      labelWrap('Name', nameInp),
+      labelWrap('Job Type', jobSel),
+      labelWrap('Tax % (global)', taxInp),
+      mkSpacer(),
+      addItemBtn,
+      delBtn
+    );
+
+    const list = document.createElement('div');
+    q.items.forEach((it, i) => list.appendChild(renderItemCard(q, it, i)));
+
+    const foot = document.createElement('div'); foot.className='totals';
+    foot.innerHTML = `
+      <div class="card"><div class="muted">Subtotal</div><div class="big">₱ ${qTotals.subtotal.toLocaleString()}</div></div>
+      <div class="card"><div class="muted">Tax (${state.taxPct}%)</div><div class="big">₱ ${qTotals.tax.toLocaleString()}</div></div>
+      <div class="card"><div class="muted">Grand Total</div><div class="big">₱ ${qTotals.grand.toLocaleString()}</div></div>
+    `;
+
+    editorEl.innerHTML=''; editorEl.append(header, list, foot);
+  }
+
+  function renderItemCard(q, it, idx){
+    const jt = jobTypeById(q.jobTypeId);
+    const card = document.createElement('div'); card.className='pairBox';
+
+    const head = document.createElement('div'); head.className='pairHead';
+    const title = document.createElement('div'); title.innerHTML = `<strong>Item ${idx+1}</strong> — <span class="muted">${machineById(it.machineId).name}</span>`;
+
+    const machineSel = document.createElement('select');
+    MACHINES.forEach(m=>{ const o=document.createElement('option'); o.value=m.id; o.textContent=m.name; machineSel.appendChild(o); });
+    machineSel.value = it.machineId; machineSel.addEventListener('change', ()=>{ it.machineId = machineSel.value; save(); renderBars(); });
+
+    const right = document.createElement('div'); right.className='right';
+    const dupBtn = document.createElement('button'); dupBtn.textContent='Duplicate'; dupBtn.addEventListener('click', ()=>{ const copy=JSON.parse(JSON.stringify(it)); copy.id=newId('it'); q.items.splice(idx+1,0,copy); save(); renderEditor(); });
+    const remBtn = document.createElement('button'); remBtn.textContent='Remove'; remBtn.addEventListener('click', ()=>{ if(!confirm('Remove this item?')) return; q.items.splice(idx,1); save(); render(); });
+    right.append(dupBtn, remBtn);
+
+    head.append(title, machineSel, right);
+
+    const grid = document.createElement('div'); grid.className='fieldGrid';
+    jt.fields.forEach(f => {
+      const box = document.createElement('div'); box.className='fieldCard';
+      const lab = document.createElement('div'); lab.textContent = f.label; lab.className='muted'; lab.style.marginBottom='6px';
+      const inp = document.createElement('input'); inp.type=f.type||'text'; if(f.min!==undefined) inp.min=String(f.min); if(f.step!==undefined) inp.step=String(f.step); inp.value = it.values[f.key] ?? '';
+      inp.addEventListener('input', ()=>{ it.values[f.key] = inp.value; save(); renderBars(); updateTotal(); });
+      box.append(lab, inp); grid.appendChild(box);
+    });
+
+    const totalRow = document.createElement('div'); totalRow.style.display='flex'; totalRow.style.justifyContent='flex-end'; totalRow.style.gap='10px';
+    const totalChip = document.createElement('div'); totalChip.className='chip'; totalChip.textContent='Item total: ₱ 0'; totalRow.appendChild(totalChip);
+
+    function updateTotal(){ const t = computeItemTotal(q, it); totalChip.textContent = `Item total: ₱ ${t.toLocaleString()}`; save(); renderBars(); }
+    updateTotal();
+
+    card.append(head, grid, totalRow);
+    return card;
+  }
+
+  // ---- Totals ----
+  function computeItemTotal(q, it){ const jt = jobTypeById(q.jobTypeId); try { return round( jt.compute(it) ); } catch { return 0; } }
+  function computeQuotationTotals(q){ let subtotal=0; q.items.forEach(it=> subtotal += computeItemTotal(q,it)); const tax = round(subtotal * (num(state.taxPct,0)/100)); return { subtotal: round(subtotal), tax, grand: round(subtotal+tax) }; }
+  function computeSummaryTotals(){ let grand=0, sub=0, tax=0; state.quotations.forEach(q=>{ const t=computeQuotationTotals(q); sub+=t.subtotal; tax+=t.tax; grand+=t.grand; }); return { subtotal: round(sub), tax: round(tax), grandTotal: round(grand) }; }
+
+  // ---- Small helpers ----
+  function mkSpacer(){ const s=document.createElement('div'); s.className='spacer'; return s; }
+  function labelWrap(lbl, el){ const w=document.createElement('div'); const l=document.createElement('div'); l.className='muted'; l.textContent=lbl; w.append(l, el); return w; }
+
+  // ---- Root render ----
+  function render(){ renderBars(); renderEditor(); }
+  render();
+  </script>
+</body>
+</html>
